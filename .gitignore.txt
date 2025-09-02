@@ -1,0 +1,20 @@
+@"
+# dependencies & build
+node_modules/
+dist/
+dist-ssr/
+out/
+
+# local DB files (don’t version these)
+*.ftdb
+*.sqlite
+*.db
+
+# logs & OS junk
+*.log
+.DS_Store
+Thumbs.db
+
+# VS Code noise (optional)
+.vscode/*.log
+"@ | Out-File -Encoding utf8 .\.gitignore

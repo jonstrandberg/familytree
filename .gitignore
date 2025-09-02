@@ -1,0 +1,11 @@
+﻿node_modules/
+dist/
+dist-ssr/
+out/
+*.ftdb
+*.sqlite
+*.db
+*.log
+.DS_Store
+Thumbs.db
+.vscode/*.log
