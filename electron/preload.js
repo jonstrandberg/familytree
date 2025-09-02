@@ -1,27 +1,36 @@
-// electron/preload.js  (CommonJS; see electron/package.json)
-const { contextBridge, ipcRenderer } = require('electron');
+// electron/preload.js
+// Make sure your BrowserWindow uses:
+// webPreferences: { contextIsolation: true, nodeIntegration: false, preload: <path-to-this-file> }
 
-console.log('[preload] loaded');
+const { contextBridge, ipcRenderer } = require('electron')
 
-const api = {
-  // Project commands
-  projectNew:    () => ipcRenderer.invoke('project:new'),
-  projectOpen:   () => ipcRenderer.invoke('project:open'),
+// Wrap invoke so renderer always gets { ok, data?, error? }
+const wrap = (p) =>
+  Promise.resolve(p)
+    .then((data) => ({ ok: true, data }))
+    .catch((err) => ({
+      ok: false,
+      error: (err && (err.message || err.toString())) || 'Unknown error',
+    }))
+
+contextBridge.exposeInMainWorld('api', {
+  // Project
+  projectNew:  () => wrap(ipcRenderer.invoke('project:new')),
+  projectOpen: () => wrap(ipcRenderer.invoke('project:open')),
   projectSaveAs: () => ipcRenderer.invoke('project:saveAs'),
 
-  // DB commands
-  listPeople:    () => ipcRenderer.invoke('db:listPeople'),
-  getPerson:     (id) => ipcRenderer.invoke('db:getPerson', id),
-  createPerson:  (payload) => ipcRenderer.invoke('db:createPerson', payload),
-  updatePerson:  (payload) => ipcRenderer.invoke('db:updatePerson', payload),
+  // DB
+  listPeople:   () => ipcRenderer.invoke('db:listPeople'),
+  getPerson:    (id) => ipcRenderer.invoke('db:getPerson', id),
+  createPerson: (payload) => ipcRenderer.invoke('db:createPerson', payload),
+  updatePerson: (payload) => ipcRenderer.invoke('db:updatePerson', payload),
 
-  // Optional: subscribe to status messages from main
+  // Optional status stream
   onStatus: (cb) => {
-    const handler = (_e, msg) => { try { cb && cb(msg); } catch {}
-    };
-    ipcRenderer.on('status', handler);
-    return () => ipcRenderer.removeListener('status', handler);
-  }
-};
+    if (typeof cb !== 'function') return () => {}
+    const handler = (_e, msg) => { try { cb(msg) } catch {} }
+    ipcRenderer.on('status', handler)
+    return () => ipcRenderer.removeListener('status', handler)
+  },
+})
 
-contextBridge.exposeInMainWorld('api', api);

@@ -1,145 +1,116 @@
+// src/ui/PersonForm.jsx
 import React, { useEffect, useState } from 'react'
 import { api } from '../api.js'
 
-export default function PersonForm({ id, projectOpen = false, onSaved }) {
-  const [person, setPerson] = useState(null)
-  const [primary, setPrimary] = useState({ given: '', family: '' })
-  const [error, setError] = useState(null)
+export default function PersonForm({ id, onSaved }) {
+  const [form, setForm] = useState({
+    given: '',
+    family: '',
+    birth_date: '',
+    death_date: '',
+    occupation: '',
+    sex: 'U',
+    notes: '',
+  })
   const [saving, setSaving] = useState(false)
-  const [savedMsg, setSavedMsg] = useState('')
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    let cancelled = false
-
-    // do not hit DB until a project is open and we have a valid id
-    if (!projectOpen || !id) {
-      setPerson(null)
-      return
-    }
-
-    ;(async () => {
+    let live = true
+    const load = async () => {
       try {
-        const res = await api?.getPerson?.(id)
-        if (cancelled) return
-        const p = res?.person || { id, sex: 'U' }
-        setPerson(p)
-        const nm = (res?.names?.find(n => n.is_primary)) || {}
-        setPrimary({
-          given: nm.given ?? p.given ?? '',
-          family: nm.family ?? p.family ?? ''
+        const p = await api.getPerson(id) // flattened in api.js
+        if (!live || !p) return
+        setForm({
+          given: p.given || '',
+          family: p.family || '',
+          birth_date: p.birth_date || '',
+          death_date: p.death_date || '',
+          occupation: p.occupation || '',
+          sex: p.sex || 'U',
+          notes: p.notes || '',
         })
-        setError(null)
       } catch (e) {
-        console.error('getPerson failed', e)
-        if (!cancelled) {
-          setError('Could not load person.')
-          setPerson({ id, sex: 'U' })
-        }
+        if (live) setError(String(e?.message || e))
       }
-    })()
+    }
+    if (id) load()
+    return () => { live = false }
+  }, [id])
 
-    return () => { cancelled = true }
-  }, [id, projectOpen])
+  const update = (k, v) => setForm(prev => ({ ...prev, [k]: v }))
 
-  if (!projectOpen) return <p>Opening project…</p>
-  if (!person) return <p>Loading…</p>
-
-  const onChange = (k, v) => setPerson(p => ({ ...p, [k]: v }))
-
-  const save = async () => {
+  const handleSave = async (e) => {
+    e.preventDefault()
+    setSaving(true); setError('')
     try {
-      setSaving(true)
-      setSavedMsg('')
-      const res = await api?.updatePerson?.({
-        id: person.id,
-        given: primary.given,
-        family: primary.family,
-        birth_date: person.birth_date || '',
-        death_date: person.death_date || '',
-        sex: person.sex || 'U',
-        occupation: person.occupation || '',
-        notes: person.notes || ''
-      })
-      if (res?.person) setPerson(res.person)
-      setSavedMsg('Saved')
-      setTimeout(() => setSavedMsg(''), 1200)
-      onSaved?.(res?.person)
+      const res = await api.updatePerson(id, form) // sends one object with id + DB keys
+      if (!res?.ok) throw new Error(res?.error || 'Save failed')
+      onSaved && onSaved()
     } catch (e) {
-      console.error('updatePerson failed', e)
-      setError('Save failed.')
+      setError(String(e?.message || e))
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <div style={{ maxWidth: 720 }}>
-      {error && <p style={{ color: 'tomato' }}>{error}</p>}
-      <h2>Edit person</h2>
+    <form onSubmit={handleSave} style={{ display: 'grid', gap: 10 }}>
+      <h3 style={{ margin: '0 0 6px', fontSize: 18 }}>Edit person</h3>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <label>Given name
-          <input
-            value={primary.given}
-            onChange={e => setPrimary(s => ({ ...s, given: e.target.value }))}
-          />
-        </label>
+      {error && (
+        <div style={{ background: '#7f1d1d', color: '#fff', padding: 8, borderRadius: 8 }}>
+          {error}
+        </div>
+      )}
 
-        <label>Family name
-          <input
-            value={primary.family}
-            onChange={e => setPrimary(s => ({ ...s, family: e.target.value }))}
-          />
-        </label>
+      <label style={{ display: 'grid', gap: 4 }}>
+        <span>Given name</span>
+        <input value={form.given} onChange={e => update('given', e.target.value)} />
+      </label>
 
-        <label>Birth date
-          <input
-            value={person.birth_date || ''}
-            onChange={e => onChange('birth_date', e.target.value)}
-            placeholder="e.g. 1988-03-21 or 21 Mar 1988"
-          />
-        </label>
+      <label style={{ display: 'grid', gap: 4 }}>
+        <span>Family name</span>
+        <input value={form.family} onChange={e => update('family', e.target.value)} />
+      </label>
 
-        <label>Death date
-          <input
-            value={person.death_date || ''}
-            onChange={e => onChange('death_date', e.target.value)}
-            placeholder="optional"
-          />
-        </label>
-
-        <label>Sex
-          <select
-            value={person.sex || 'U'}
-            onChange={e => onChange('sex', e.target.value)}
-          >
-            <option value="U">Unknown</option>
-            <option value="M">Male</option>
-            <option value="F">Female</option>
-          </select>
-        </label>
-
-        <label>Occupation
-          <input
-            value={person.occupation || ''}
-            onChange={e => onChange('occupation', e.target.value)}
-          />
-        </label>
-      </div>
-
-      <label style={{ display: 'block', marginTop: 12 }}>Notes
-        <textarea
-          rows={6}
-          style={{ width: '100%' }}
-          value={person.notes || ''}
-          onChange={e => onChange('notes', e.target.value)}
+      <label style={{ display: 'grid', gap: 4 }}>
+        <span>Birth</span>
+        <input
+          value={form.birth_date}
+          onChange={e => update('birth_date', e.target.value)}
+          placeholder="YYYY or free text"
         />
       </label>
 
-      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
-        {savedMsg && <span style={{ color: '#22c55e', fontWeight: 600 }}>{savedMsg}</span>}
+      <label style={{ display: 'grid', gap: 4 }}>
+        <span>Death</span>
+        <input
+          value={form.death_date}
+          onChange={e => update('death_date', e.target.value)}
+          placeholder="YYYY or free text"
+        />
+      </label>
+
+      <label style={{ display: 'grid', gap: 4 }}>
+        <span>Occupation</span>
+        <input value={form.occupation} onChange={e => update('occupation', e.target.value)} />
+      </label>
+
+      <label style={{ display: 'grid', gap: 4 }}>
+        <span>Notes</span>
+        <textarea
+          rows={5}
+          value={form.notes}
+          onChange={e => update('notes', e.target.value)}
+          style={{ resize: 'vertical' }}
+        />
+      </label>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+        <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
-    </div>
+    </form>
   )
 }
+

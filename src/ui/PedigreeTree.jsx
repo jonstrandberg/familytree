@@ -1,136 +1,146 @@
-import React, { useMemo, useRef, useState, useEffect } from 'react'
+// src/ui/PedigreeTree.jsx
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react'
 import Tree from 'react-d3-tree'
 
-const Silhouette = () => (
-  <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden>
-    <circle cx="12" cy="8" r="4" fill="#6b7280"/>
-    <path d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6" fill="#374151"/>
-  </svg>
-)
+const CARD_W = 210
+const CARD_H = 56
 
-// Demo pedigree so you immediately see something
-const sample = {
-  id: 'you', name: 'You', dates: '1988–Living', occupation: '—',
-  father: {
-    id: 'f', name: 'Father', dates: '1960–', occupation: 'Carpenter',
-    father: { id: 'gf1', name: 'Paternal Grandfather', dates: '1931–1998' },
-    mother: { id: 'gm1', name: 'Paternal Grandmother', dates: '1933–2001' }
-  },
-  mother: {
-    id: 'm', name: 'Mother', dates: '1962–', occupation: 'Teacher',
-    father: { id: 'gf2', name: 'Maternal Grandfather', dates: '1930–2000' },
-    mother: { id: 'gm2', name: 'Maternal Grandmother', dates: '1932–2010' }
+const COLORS = {
+  bg: '#0b1325',
+  border: '#1f2a44',
+  text: '#e5e7eb',
+  sub: 'rgba(229,231,235,.65)',
+  link: '#273349',
+}
+
+const fullName = (p) => {
+  if (!p) return ''
+  const a = (p.given || '').trim()
+  const b = (p.family || '').trim()
+  return [a, b].filter(Boolean).join(' ') || '—'
+}
+
+const fallbackLabel = (treeId) => {
+  switch (treeId) {
+    case 'you': return 'You'
+    case 'f':   return 'Father'
+    case 'm':   return 'Mother'
+    case 'gfP': return 'Grandfather, Paternal'
+    case 'gmP': return 'Grandmother, Paternal'
+    case 'gfM': return 'Grandfather, Maternal'
+    case 'gmM': return 'Grandmother, Maternal'
+    default:    return treeId
   }
 }
 
-function formatDates(b, d) {
-  const left = (b || '').trim()
-  const right = (d || '').trim()
-  if (left && right) return `${left}–${right}`
-  if (left) return `${left}–`
-  if (right) return `–${right}`
-  return '—'
-}
-
-// Build react-d3-tree data; if a node is bound to a person, show that person’s data
-function buildTreeWithBindings(node, bindings, peopleById) {
-  const boundId = bindings[node.id]
-  const person = boundId ? peopleById.get(boundId) : null
-
-  const displayName = person
-    ? [person.given, person.family].filter(Boolean).join(' ') || '—'
-    : node.name
-
-  const displayDates = person ? formatDates(person.birth_date, person.death_date) : node.dates
-  const displayOccupation = person ? (person.occupation || '') : (node.occupation || '')
-
-  const children = []
-  if (node.father) children.push(buildTreeWithBindings(node.father, bindings, peopleById))
-  if (node.mother) children.push(buildTreeWithBindings(node.mother, bindings, peopleById))
-
-  return {
-    name: displayName,
-    attributes: { dates: displayDates, occupation: displayOccupation },
-    nodeData: { ...node, name: displayName, dates: displayDates, occupation: displayOccupation },
-    children
-  }
-}
-
-function Node({ nodeDatum, onPick }) {
-  const nd = nodeDatum.nodeData || {}
-  return (
-    <foreignObject width={230} height={100} x={-115} y={-50}>
-      <div
-        style={{
-          width: 210, minHeight: 92, background: '#0b1020', color: '#e5e7eb',
-          border: '1px solid #374151', borderRadius: 14,
-          boxShadow: '0 10px 24px rgba(0,0,0,.25)', display: 'flex',
-          gap: 12, alignItems: 'center', padding: 10, cursor: 'pointer'
-        }}
-        onClick={() => onPick && onPick(nd)}  // pass the tree node (includes its .id)
-      >
-        <div style={{
-          width: 54, height: 54, borderRadius: 10, background: '#111827',
-          border: '1px solid #374151', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', overflow: 'hidden'
-        }}>
-          <Silhouette/>
-        </div>
-        <div>
-          <div style={{ fontWeight: 800, lineHeight: 1.05 }}>{nodeDatum.name || '—'}</div>
-          <div style={{ fontSize: 12, color: '#94a3b8' }}>{nodeDatum.attributes?.dates || '—'}</div>
-          {nodeDatum.attributes?.occupation && (
-            <div style={{ fontSize: 12, color: '#9ca3af' }}>{nodeDatum.attributes.occupation}</div>
-          )}
-        </div>
-      </div>
-    </foreignObject>
-  )
-}
-
-/**
- * Props:
- *  - people: array of person records from your API
- *  - bindings: { [treeId]: personId }
- *  - onSelectPerson: (treeNodeObject) => void
- */
 export default function PedigreeTree({ people = [], bindings = {}, onSelectPerson }) {
-  const peopleById = useMemo(() => new Map(people.map(p => [p.id, p])), [people])
-  const data = useMemo(
-    () => buildTreeWithBindings(sample, bindings, peopleById),
-    [bindings, peopleById]
-  )
+  const containerRef = useRef(null)
+  const [translate, setTranslate] = useState({ x: 160, y: 300 })
 
-  const ref = useRef(null)
-  const [size, setSize] = useState({ width: 1000, height: 700 })
-
+  // center vertically, keep root at the left
   useEffect(() => {
-    if (!ref.current) return
-    const ro = new ResizeObserver(([e]) =>
-      setSize({ width: e.contentRect.width, height: e.contentRect.height })
-    )
-    ro.observe(ref.current)
+    const measure = () => {
+      const el = containerRef.current
+      if (!el) return
+      const h = el.clientHeight || 600
+      setTranslate({ x: 160, y: Math.max(140, h / 2) })
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    if (containerRef.current) ro.observe(containerRef.current)
     return () => ro.disconnect()
   }, [])
 
-  // Re-mount tree when people/bindings change so labels update
-  const treeKey = JSON.stringify({
-    b: bindings,
-    p: people.map(p => ({ id: p.id, g: p.given, f: p.family, b: p.birth_date, d: p.death_date, o: p.occupation }))
-  })
+  const peopleById = useMemo(() => {
+    const m = new Map()
+    for (const p of people) m.set(p.id, p)
+    return m
+  }, [people])
+
+  const labelFor = useCallback((treeId) => {
+    const pid = bindings?.[treeId]
+    const person = pid ? peopleById.get(pid) : null
+    return person ? fullName(person) : fallbackLabel(treeId)
+  }, [bindings, peopleById])
+
+  const subtitleFor = useCallback((treeId) => {
+    const pid = bindings?.[treeId]
+    const person = pid ? peopleById.get(pid) : null
+    return person?.occupation || '—'
+  }, [bindings, peopleById])
+
+  // Build react-d3-tree structure (root = you at left, ancestors to the right)
+  const data = useMemo(() => {
+    const leaf = (id) => ({
+      name: labelFor(id),
+      attributes: { subtitle: subtitleFor(id), treeId: id },
+      _cardSize: { w: CARD_W, h: CARD_H },
+    })
+    return [{
+      name: labelFor('you'),
+      attributes: { subtitle: subtitleFor('you'), treeId: 'you' },
+      _cardSize: { w: CARD_W, h: CARD_H },
+      children: [
+        {
+          name: labelFor('m'),
+          attributes: { subtitle: subtitleFor('m'), treeId: 'm' },
+          _cardSize: { w: CARD_W, h: CARD_H },
+          children: [leaf('gmM'), leaf('gfM')], // maternal line to the right
+        },
+        {
+          name: labelFor('f'),
+          attributes: { subtitle: subtitleFor('f'), treeId: 'f' },
+          _cardSize: { w: CARD_W, h: CARD_H },
+          children: [leaf('gmP'), leaf('gfP')], // paternal line to the right
+        },
+      ],
+    }]
+  }, [labelFor, subtitleFor])
+
+  // Custom node card
+  const renderNode = useCallback(({ nodeDatum }) => {
+    const treeId = nodeDatum?.attributes?.treeId
+    const title = nodeDatum?.name || ''
+    const sub = nodeDatum?.attributes?.subtitle || '—'
+    const x = -CARD_W / 2
+    const y = -CARD_H / 2
+    const rx = 12
+
+    return (
+      <g onClick={() => onSelectPerson?.({ id: treeId, name: title, attributes: {} })} style={{ cursor: 'pointer' }}>
+        <rect x={x} y={y} width={CARD_W} height={CARD_H} rx={rx} ry={rx}
+              fill={COLORS.bg} stroke={COLORS.border} />
+        <foreignObject x={x + 12} y={y + 6} width={CARD_W - 24} height={CARD_H - 12}>
+          <div xmlns="http://www.w3.org/1999/xhtml" style={{ color: COLORS.text, fontFamily: 'system-ui,sans-serif' }}>
+            <div style={{ fontWeight: 700, lineHeight: '18px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {title}
+            </div>
+            <div style={{ opacity: .7, fontSize: 12, lineHeight: '18px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {sub}
+            </div>
+          </div>
+        </foreignObject>
+      </g>
+    )
+  }, [onSelectPerson])
+
+  // elbow links feel nice horizontally
+  const pathFunc = 'elbow'
+  const styles = { links: { stroke: COLORS.link, strokeWidth: 2 } }
 
   return (
-    <div ref={ref} style={{ width: '100%', height: '100%', background: 'var(--canvas, #111827)' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Tree
-        key={treeKey}
         data={data}
-        orientation="horizontal"
-        translate={{ x: 260, y: size.height / 2 }}
-        separation={{ siblings: 1.1, nonSiblings: 1.3 }}
-        pathFunc="step"
-        allowForeignObjects
-        renderCustomNodeElement={(props) => <Node {...props} onPick={onSelectPerson} />}
+        translate={translate}
+        orientation="horizontal"     // root on the side
+        separation={{ siblings: 1.2, nonSiblings: 1.4 }}
         zoomable
+        initialDepth={Infinity}
+        collapsible={false}
+        renderCustomNodeElement={renderNode}
+        pathFunc={pathFunc}
+        styles={styles}
       />
     </div>
   )
